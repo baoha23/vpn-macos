@@ -10,6 +10,6 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "Info.plist" "$APP/Contents/Info.plist"
 cp ".build/release/GPSVPNAgent" "$APP/Contents/MacOS/GPSVPNAgent"
-codesign --force --sign - "$APP"
+codesign --force --identifier local.gps-vpn.agent --sign - "$APP"
 
 echo "Created $APP"

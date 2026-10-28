@@ -86,7 +86,7 @@ final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDeleg
         let formatter = ISO8601DateFormatter()
         if let latitude = defaults.object(forKey: "manualLatitude") as? Double,
            let longitude = defaults.object(forKey: "manualLongitude") as? Double {
-            let capturedAt = defaults.object(forKey: "manualCapturedAt") as? Double
+            let capturedAt = (defaults.object(forKey: "manualCapturedAt") as? Double)?
                 .map { Date(timeIntervalSince1970: $0) } ?? Date()
             return LocationPayload(
                 latitude: latitude,
@@ -171,8 +171,11 @@ enum APIKey {
 
     private static func generate() -> String {
         var bytes = Data(count: 32)
-        let result = bytes.withUnsafeMutableBytes { pointer in
-            SecRandomCopyBytes(kSecRandomDefault, pointer.count, pointer.baseAddress)
+        let result = bytes.withUnsafeMutableBytes { pointer -> OSStatus in
+            guard let baseAddress = pointer.baseAddress else {
+                return errSecParam
+            }
+            return SecRandomCopyBytes(kSecRandomDefault, pointer.count, baseAddress)
         }
         precondition(result == errSecSuccess)
         return bytes.base64EncodedString()
@@ -299,13 +302,7 @@ final class HTTPServer {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let encoded = try encoder.encode(AnyEncodable(body))
-            let header = """
-            HTTP/1.1 \(status)\r
-            Content-Type: application/json\r
-            Content-Length: \(encoded.count)\r
-            Connection: close\r
-            \r
-            """
+            let header = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(encoded.count)\r\nConnection: close\r\n\r\n"
             connection.send(content: Data(header.utf8) + encoded, completion: .contentProcessed { _ in
                 connection.cancel()
             })
