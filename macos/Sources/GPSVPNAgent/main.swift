@@ -86,7 +86,7 @@ final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDeleg
         let formatter = ISO8601DateFormatter()
         if let latitude = defaults.object(forKey: "manualLatitude") as? Double,
            let longitude = defaults.object(forKey: "manualLongitude") as? Double {
-            let capturedAt = (defaults.object(forKey: "manualCapturedAt") as? Double)?
+            let capturedAt = (defaults.object(forKey: "manualCapturedAt") as? Double)
                 .map { Date(timeIntervalSince1970: $0) } ?? Date()
             return LocationPayload(
                 latitude: latitude,
@@ -156,16 +156,42 @@ final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDeleg
     }
 }
 
-enum APIKey {
-    private static let service = "local.gps-vpn.agent"
-    private static let account = "api"
-
-    static func loadOrCreate() -> String {
-        if let existing = read() {
-            return existing
+enum TokenStore {
+    private static var fileURL: URL {
+        get throws {
+            let supportURL = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            return supportURL
+                .appendingPathComponent("GPSVPNAgent", isDirectory: true)
+                .appendingPathComponent("api-token", isDirectory: false)
         }
+    }
+
+    static func loadOrCreate() throws -> String {
+        let url = try fileURL
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+
+        if let data = try? Data(contentsOf: url),
+           let token = String(data: data, encoding: .utf8),
+           token.count >= 32 {
+            return token
+        }
+
         let token = generate()
-        save(token)
+        let data = Data(token.utf8)
+        try data.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
         return token
     }
 
@@ -184,30 +210,6 @@ enum APIKey {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    private static func query() -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-    }
-
-    private static func read() -> String? {
-        var query = self.query()
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func save(_ token: String) {
-        var attributes = query()
-        attributes[kSecValueData as String] = Data(token.utf8)
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(attributes as CFDictionary, nil)
-    }
 }
 
 final class HTTPServer {
@@ -215,8 +217,6 @@ final class HTTPServer {
     private let queue = DispatchQueue(label: "local.gps-vpn.agent.http")
     private let token: String
     private let provider: LocationProvider
-    private let formatter = ISO8601DateFormatter()
-
     init(port: UInt16, token: String, provider: LocationProvider) throws {
         self.token = token
         self.provider = provider
@@ -425,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let provider = LocationProvider()
-let token = APIKey.loadOrCreate()
+let token = try TokenStore.loadOrCreate()
 
 do {
     let server = try HTTPServer(port: 8787, token: token, provider: provider)

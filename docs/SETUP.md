@@ -59,6 +59,7 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Security Notes
 
-- The API token is required on every location request.
+- The token is required on every location request.
 - Tailscale Serve keeps the API private to your tailnet.
-- If the token is compromised, remove the app's Keychain item or replace it before reinstalling.
+- The token is stored in `~/Library/Application Support/GPSVPNAgent/api-token` with `0600` permissions.
+- If the token is compromised, delete that file, restart the agent, and update Android with the new token.
