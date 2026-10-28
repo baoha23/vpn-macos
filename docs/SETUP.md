@@ -57,6 +57,12 @@ The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 - With the mock service running, Google Maps or another location-testing app should show the coordinates returned by the Mac agent.
 - Stop the service or turn off mock-location mode before returning the phone to real GPS use.
 
+To watch Android API calls on the Mac without logging tokens:
+
+```bash
+log stream --predicate 'subsystem == "local.gps-vpn.agent"' --info
+```
+
 ## Security Notes
 
 - The token is required on every location request.

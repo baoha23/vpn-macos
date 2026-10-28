@@ -3,6 +3,7 @@ import Combine
 import CoreLocation
 import Foundation
 import Network
+import os
 import Security
 
 struct LocationPayload: Encodable {
@@ -213,6 +214,7 @@ enum TokenStore {
 }
 
 final class HTTPServer {
+    private static let logger = Logger(subsystem: "local.gps-vpn.agent", category: "http")
     private let listener: NWListener
     private let queue = DispatchQueue(label: "local.gps-vpn.agent.http")
     private let token: String
@@ -234,8 +236,11 @@ final class HTTPServer {
             self?.accept(connection)
         }
         listener.stateUpdateHandler = { state in
+            if case .ready = state {
+                Self.logger.notice("HTTP server listening on 127.0.0.1:8787")
+            }
             if case .failed(let error) = state {
-                NSLog("GPSVPN HTTP server failed: \(error)")
+                Self.logger.error("HTTP server failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         listener.start(queue: queue)
@@ -264,26 +269,26 @@ final class HTTPServer {
         let requestLine = requestText.split(separator: "\r\n", maxSplits: 1).first.map(String.init) ?? ""
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2 else {
-            send(connection, status: "400 Bad Request", body: ["error": "bad_request"])
+            send(connection, path: "<invalid>", status: "400 Bad Request", body: ErrorResponse(error: "bad_request"))
             return
         }
 
         let path = String(parts[1])
         switch path {
         case "/v1/health":
-            send(connection, status: "200 OK", body: HealthResponse(status: "ok", locationReady: provider.isReady))
+            send(connection, path: path, status: "200 OK", body: HealthResponse(status: "ok", locationReady: provider.isReady))
         case "/v1/location":
             guard authorized(requestText) else {
-                send(connection, status: "401 Unauthorized", body: ErrorResponse(error: "unauthorized"))
+                send(connection, path: path, status: "401 Unauthorized", body: ErrorResponse(error: "unauthorized"))
                 return
             }
             guard let payload = provider.currentPayload() else {
-                send(connection, status: "503 Service Unavailable", body: ErrorResponse(error: "location_unavailable", message: provider.statusText))
+                send(connection, path: path, status: "503 Service Unavailable", body: ErrorResponse(error: "location_unavailable", message: provider.statusText))
                 return
             }
-            send(connection, status: "200 OK", body: payload)
+            send(connection, path: path, status: "200 OK", body: payload)
         default:
-            send(connection, status: "404 Not Found", body: ErrorResponse(error: "not_found"))
+            send(connection, path: path, status: "404 Not Found", body: ErrorResponse(error: "not_found"))
         }
     }
 
@@ -297,12 +302,13 @@ final class HTTPServer {
             .trimmingCharacters(in: .whitespaces) == expected
     }
 
-    private func send(_ connection: NWConnection, status: String, body: Encodable) {
+    private func send(_ connection: NWConnection, path: String, status: String, body: Encodable) {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let encoded = try encoder.encode(AnyEncodable(body))
             let header = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(encoded.count)\r\nConnection: close\r\n\r\n"
+            Self.logger.notice("\(status, privacy: .public) \(path, privacy: .public) bytes=\(encoded.count, privacy: .public)")
             connection.send(content: Data(header.utf8) + encoded, completion: .contentProcessed { _ in
                 connection.cancel()
             })
